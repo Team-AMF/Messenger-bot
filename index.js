@@ -1,88 +1,118 @@
 const express = require('express');
-const axios = require('axios');
 const bodyParser = require('body-parser');
+const axios = require('axios');
 const app = express();
+const PORT = process.env.PORT || 8000;
 
-const OPENAI_API_KEY = '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'; // আপনার OpenAI API কী দিন।
-const PAGE_ACCESS_TOKEN = 'EAAKVe2JRifQBOxWfMYSBGDTiO0iu5MK3BK8f8cMbbPerfcDG1BDn54KDTRVyLj9rnbT1ZBrpsjC2nrzf3ZAPQMT73j5BR8nFPV8hL7yqJXrmT1BvunKhEZB4rDDvX7SRZATcQMpOoxXra7ZBxsDyI4GZAw2K7vNZCIcx2qfUqBHL1xxIPSNZCDr76UWaiwjRMfHXePtZC6ThKPAZDZD'; // আপনার ফেসবুক পেজ অ্যাক্সেস টোকেন
+// Facebook Webhook Verification Token & Page Access Token
+const VERIFY_TOKEN = 'my-123';  // আপনার টোকেন এখানে দিন
+const PAGE_ACCESS_TOKEN = 'EAAKVe2JRifQBOxWfMYSBGDTiO0iu5MK3BK8f8cMbbPerfcDG1BDn54KDTRVyLj9rnbT1ZBrpsjC2nrzf3ZAPQMT73j5BR8nFPV8hL7yqJXrmT1BvunKhEZB4rDDvX7SRZATcQMpOoxXra7ZBxsDyI4GZAw2K7vNZCIcx2qfUqBHL1xxIPSNZCDr76UWaiwjRMfHXePtZC6ThKPAZDZD';  // আপনার ফেসবুক পেজ অ্যাক্সেস টোকেন এখানে দিন
 
-app.use(bodyParser.json());
-app.use(bodyParser.urlencoded({ extended: true }));
+// OpenAI API Key (আপনার OpenAI API Key এখানে দিন)
+const OPENAI_API_KEY = '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';  // OpenAI API Key এখানে দিন
 
-// GPT-4 থেকে বাংলা ভাষায় উত্তর পাওয়ার ফাংশন
-async function getGPTResponse(userMessage) {
-    const apiEndpoint = 'https://api.openai.com/v1/completions';
-    const headers = {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${OPENAI_API_KEY}`
-    };
+// Webhook Verification Endpoint (GET)
+app.get('/webhook', (req, res) => {
+    const mode = req.query['hub.mode'];
+    const token = req.query['hub.verify_token'];
+    const challenge = req.query['hub.challenge'];
 
-    const data = {
-        model: 'gpt-4', 
-        prompt: `Answer the following question in Bengali: ${userMessage}`,
-        max_tokens: 100,
-        temperature: 0.7,
-    };
-
-    try {
-        const response = await axios.post(apiEndpoint, data, { headers });
-        return response.data.choices[0].text.trim();  // GPT-4 থেকে বাংলা উত্তর
-    } catch (error) {
-        console.error('Error getting GPT response:', error);
-        throw error;
-    }
-}
-
-// মেসেজ রিসিভ এবং পাঠানোর জন্য
-app.post('/webhook', async (req, res) => {
-    const data = req.body;
-
-    if (data.object === 'page') {
-        data.entry.forEach((entry) => {
-            const webhookEvent = entry.messaging[0];
-            const senderId = webhookEvent.sender.id;
-            const message = webhookEvent.message.text;
-
-            console.log(`Received message from user: ${senderId}`);
-            console.log(`Message: ${message}`);
-
-            // GPT-4 থেকে বাংলা উত্তর পাওয়ার জন্য কল করা হচ্ছে
-            getGPTResponse(message)
-                .then((gptResponse) => {
-                    sendMessage(senderId, gptResponse);
-                })
-                .catch((error) => {
-                    console.error('Error getting GPT response:', error);
-                    sendMessage(senderId, 'দুঃখিত, আমি আপনার প্রশ্নটি বুঝতে পারিনি।');
-                });
-        });
-        res.status(200).send('EVENT_RECEIVED');
-    } else {
-        res.sendStatus(404);
+    if (mode && token) {
+        if (mode === 'subscribe' && token === VERIFY_TOKEN) {
+            console.log('Webhook verified!');
+            res.status(200).send(challenge);  // ফেসবুক Webhook ভেরিফাই করলে চ্যালেঞ্জ পাঠাবে
+        } else {
+            res.status(403).send('Verification failed');  // ভেরিফিকেশন ব্যর্থ হলে 403 ফেরত পাঠাবে
+        }
     }
 });
 
-// ফেসবুকে মেসেজ পাঠানো
-function sendMessage(senderId, text) {
-    const messageData = {
-        recipient: { id: senderId },
-        message: { text: text }
-    };
+// Webhook to handle messages (POST)
+app.post('/webhook', (req, res) => {
+    const data = req.body;
 
+    // Ensure this is a page subscription
+    if (data.object === 'page') {
+        data.entry.forEach((entry) => {
+            const pageID = entry.id;
+            const timeOfEvent = entry.time;
+
+            entry.messaging.forEach((event) => {
+                if (event.message) {
+                    handleMessage(event.sender.id, event.message);
+                }
+            });
+        });
+        res.status(200).send('EVENT_RECEIVED');  // মেসেজ রিসিভ হলে সাড়া দেবে
+    } else {
+        res.sendStatus(404);  // যদি কোনো ত্রুটি থাকে
+    }
+});
+
+// Function to handle incoming messages
+async function handleMessage(senderID, receivedMessage) {
+    let response;
+
+    // If the message contains text, query OpenAI for a response
+    if (receivedMessage.text) {
+        try {
+            // Make request to OpenAI API to get the response
+            const openAIResponse = await axios.post(
+                'https://api.openai.com/v1/completions',
+                {
+                    model: 'text-davinci-003',  // বা আপনার পছন্দমত মডেল
+                    prompt: receivedMessage.text,
+                    max_tokens: 100,
+                    temperature: 0.7,
+                },
+                {
+                    headers: {
+                        'Authorization': `Bearer ${OPENAI_API_KEY}`,
+                        'Content-Type': 'application/json',
+                    },
+                }
+            );
+
+            // Extract the response text from OpenAI
+            response = {
+                text: openAIResponse.data.choices[0].text.trim(),
+            };
+        } catch (error) {
+            console.error('OpenAI API Error:', error.message);
+            response = { text: 'দুঃখিত, কিছু সমস্যা ঘটেছে। আমি উত্তর দিতে পারছি না।' };
+        }
+    } else {
+        response = {
+            text: "দুঃখিত, আমি এই ধরনের মেসেজ বুঝতে পারিনি।",
+        };
+    }
+
+    // Call the Facebook Send API to reply
+    callSendAPI(senderID, response);
+}
+
+// Function to send a message to Facebook user via Send API
+function callSendAPI(senderID, response) {
     axios({
         method: 'post',
-        url: `https://graph.facebook.com/v12.0/me/messages?access_token=${PAGE_ACCESS_TOKEN}`,
-        data: messageData,
-        headers: { 'Content-Type': 'application/json' }
+        url: `https://graph.facebook.com/v13.0/me/messages?access_token=${PAGE_ACCESS_TOKEN}`,
+        data: {
+            recipient: { id: senderID },
+            message: response
+        },
+        headers: {
+            'Content-Type': 'application/json'
+        }
     })
-    .then(response => {
-        console.log('Message sent successfully', response.data);
+    .then(() => {
+        console.log('Message sent successfully!');
     })
-    .catch(error => {
+    .catch((error) => {
         console.error('Error sending message:', error);
     });
 }
 
-app.listen(8000, () => {
-    console.log('Server is running on port 8000');
+// Start the server
+app.listen(PORT, () => {
+    console.log(`Server running on http://localhost:${PORT}`);
 });
